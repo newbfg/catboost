@@ -685,7 +685,8 @@ CatboostIpython.prototype.getTrace = function(parent, params) {
                     _initial_color: color
                 },
                 mode: 'lines',
-                hoveron: 'points'
+                hoveron: 'points',
+                connectgaps: true  
             };
 
         if (params.min) {
