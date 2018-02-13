@@ -1,0 +1,6 @@
+{
+"meta":{"name":"experiment","iteration_count":20,"learn_metrics":[{"name":"MAPE","value":"min"},{"name":"RMSE","value":"min"},{"name":"AUC","value":"max"}],"test_sets":["test"],"test_metrics":[{"name":"MAPE","value":"min"},{"name":"RMSE","value":"min"},{"name":"AUC","value":"max"}],"learn_sets":["learn"]},
+"iterations":[
+{"learn":["inf","inf",0.5],"iteration":0,"passed_time":0.0009625287001,"remaining_time":0.0182880453,"test":["inf","inf",0.5]},
+{"learn":["nan","nan",1],"iteration":1,"passed_time":0.001608976648,"remaining_time":0.01448078983,"test":["nan","nan",1]}
+]}

@@ -115,6 +115,7 @@ CatboostIpython.prototype.init = function() {
     ];
     this.colorsByPath = {};
     this.colorIndex = 0;
+    this.lossFuncs = {};
 };
 
 /* eslint-disable */
@@ -461,15 +462,59 @@ CatboostIpython.prototype.redrawAll = function() {
     this.redrawFunc();
 };
 
-CatboostIpython.prototype.addPoints = function(parent, data, type) {
-    var iterIndex = 0,
-        self = this;
+CatboostIpython.prototype.addPoints = function(parent, data) {
+    var self = this;
 
-    data.fields.forEach(function(name, index) {
-        if (name === 'iter') {
-            iterIndex = index;
+    data.chunks.forEach(function(item) {
+        if (typeof item.remaining_time !== 'undefined' && typeof item.passed_time !== 'undefined') {
+            self.timeLeft[data.path] = [item.iteration, item.remaining_time, item.passed_time];
         }
+
+        ['test', 'learn'].forEach(function(type) {
+            var sets = self.meta[data.path][type + '_sets'],
+                metrics = self.meta[data.path][type + '_metrics'];
+
+            for (var i = 0; i < metrics.length; i++) {
+                var nameOfMetric = metrics[i].name;
+
+                self.lossFuncs[nameOfMetric] = metrics[i].value;
+
+                var params = {chartName: nameOfMetric, index: i, train: data.train, type: type, path: data.path},
+                    key = self.getChartKey(params);
+
+                if (!self.activeTab) {
+                    self.activeTab = key.chartId;
+                }
+
+                var trace = self.getTrace(parent, params),
+                    smoothedTrace = self.getTrace(parent, $.extend({smoothed: true}, params));
+
+                if (type === 'test') {
+                    self.getTrace(parent, $.extend({min: true}, params));
+                }
+
+                for (var j = 0; j < sets.length; j++) {
+                    var nameOfSet = sets[j];
+                    var valuesOfSet = item[nameOfSet];
+
+                    var pointIndex = item.iteration;
+
+                    trace.x[pointIndex] = pointIndex;
+                    trace.y[pointIndex] = valuesOfSet[i];
+                    trace.hovertext[pointIndex] = valuesOfSet[i].toPrecision(7);
+
+                    smoothedTrace.x[pointIndex] = pointIndex;
+                }
+
+                self.chartsToRedraw[key.chartId] = true;
+
+                self.redrawAll();
+            }
+        });
     });
+
+    return;
+
 
     data.fields.forEach(function(name, index) {
         if (name === 'iter') {
@@ -793,7 +838,7 @@ CatboostIpython.prototype.getBestValue = function(data, path) {
 
     var best = data[0],
         index = 0,
-        func = this.meta[path]['loss_' + this.traces[this.activeTab].name];
+        func = this.lossFuncs[this.traces[this.activeTab].name];
 
     for (var i = 1, l = data.length; i < l; i++) {
         if (func === 'min' && data[i] < best) {
@@ -872,12 +917,12 @@ CatboostIpython.prototype.updateSerieValues = function(name, hash, iteration, cl
         $('#' + id + ' .catboost-panel__serie_iteration', this.layout).html(index);
 
         if (this.timeLeft[path][learnData.length - 1]) {
-            timeLeft = Math.ceil(Number(this.timeLeft[path][learnData.length - 1][1]) / 1000) * 1000;
+            timeLeft = this.timeLeft[path][learnData.length - 1][1];
         }
         $('#' + id + ' .catboost-panel__serie_time_left', this.layout).html(timeLeft ? ('~' + this.convertTime(timeLeft)) : '');
 
         if (this.timeLeft[path][index]) {
-            timeSpend = Math.ceil(Number(this.timeLeft[path][index][2]) / 1000) * 1000;
+            timeSpend = this.timeLeft[path][index][2];
         }
 
         $('#' + id + ' .catboost-panel__serie_time_spend', this.layout).html(this.convertTime(timeSpend));
