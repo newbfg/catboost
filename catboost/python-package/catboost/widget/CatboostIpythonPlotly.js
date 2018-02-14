@@ -234,6 +234,7 @@ CatboostIpython.prototype.addTabEvents = function() {
         self.cleanSeries();
 
         self.redrawActiveChart();
+        self.resizeCharts();
     });
 };
 
@@ -496,14 +497,17 @@ CatboostIpython.prototype.addPoints = function(parent, data) {
                 for (var j = 0; j < sets.length; j++) {
                     var nameOfSet = sets[j];
                     var valuesOfSet = item[nameOfSet];
+                    var pointValue = valuesOfSet[i];
 
                     var pointIndex = item.iteration;
 
-                    trace.x[pointIndex] = pointIndex;
-                    trace.y[pointIndex] = valuesOfSet[i];
-                    trace.hovertext[pointIndex] = valuesOfSet[i].toPrecision(7);
+                    if (pointValue !== 'inf' && pointValue !== 'nan') {
+                        trace.x[pointIndex] = pointIndex;
+                        trace.y[pointIndex] = valuesOfSet[i];
+                        trace.hovertext[pointIndex] = valuesOfSet[i].toPrecision(7);
 
-                    smoothedTrace.x[pointIndex] = pointIndex;
+                        smoothedTrace.x[pointIndex] = pointIndex;
+                    }
                 }
 
                 self.chartsToRedraw[key.chartId] = true;
