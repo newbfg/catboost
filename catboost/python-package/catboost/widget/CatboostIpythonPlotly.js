@@ -921,12 +921,12 @@ CatboostIpython.prototype.updateSerieValues = function(name, hash, iteration, cl
         $('#' + id + ' .catboost-panel__serie_test_value', this.layout).html(this.formatItemValue(testValue, index, 'test '));
         $('#' + id + ' .catboost-panel__serie_iteration', this.layout).html(index);
 
-        if (this.timeLeft[path][learnData.length - 1]) {
+        if (this.timeLeft[path] && this.timeLeft[path][learnData.length - 1]) {
             timeLeft = this.timeLeft[path][learnData.length - 1][1];
         }
         $('#' + id + ' .catboost-panel__serie_time_left', this.layout).html(timeLeft ? ('~' + this.convertTime(timeLeft)) : '');
 
-        if (this.timeLeft[path][index]) {
+        if (this.timeLeft[path] && this.timeLeft[path][index]) {
             timeSpend = this.timeLeft[path][index][2];
         }
 
