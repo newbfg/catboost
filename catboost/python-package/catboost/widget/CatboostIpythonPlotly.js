@@ -115,6 +115,7 @@ CatboostIpython.prototype.init = function() {
     ];
     this.colorsByPath = {};
     this.colorIndex = 0;
+    this.lossFuncs = {};
 };
 
 /* eslint-disable */
@@ -184,7 +185,7 @@ CatboostIpython.prototype.addLayout = function(parent) {
                                 '<input type="checkbox" class="catboost-panel__controls_checkbox" id="catboost-control-learn' + this.index + '" checked="checked"></input>' +
                                 '<label for="catboost-control-learn' + this.index + '" class="catboost-panel__controls_label"><div class="catboost-panel__serie_learn_pic" style="border-color:#999"></div>Learn</label>' +
                                 '<input type="checkbox" class="catboost-panel__controls_checkbox" id="catboost-control-test' + this.index + '" checked="checked"></input>' +
-                                '<label for="catboost-control-test' + this.index + '" class="catboost-panel__controls_label"><div class="catboost-panel__serie_test_pic" style="border-color:#999"></div>Test</label>' +
+                                '<label for="catboost-control-test' + this.index + '" class="catboost-panel__controls_label"><div class="catboost-panel__serie_test_pic" style="border-color:#999"></div>Eval</label>' +
                             '</div>' +
                             '<div class="catboost-panel__series">' +
                             '</div>' +
@@ -233,6 +234,7 @@ CatboostIpython.prototype.addTabEvents = function() {
         self.cleanSeries();
 
         self.redrawActiveChart();
+        self.resizeCharts();
     });
 };
 
@@ -461,52 +463,58 @@ CatboostIpython.prototype.redrawAll = function() {
     this.redrawFunc();
 };
 
-CatboostIpython.prototype.addPoints = function(parent, data, type) {
-    var iterIndex = 0,
-        self = this;
+CatboostIpython.prototype.addPoints = function(parent, data) {
+    var self = this;
 
-    data.fields.forEach(function(name, index) {
-        if (name === 'iter') {
-            iterIndex = index;
-        }
-    });
-
-    data.fields.forEach(function(name, index) {
-        if (name === 'iter') {
-            return;
+    data.chunks.forEach(function(item) {
+        if (typeof item.remaining_time !== 'undefined' && typeof item.passed_time !== 'undefined') {
+            self.timeLeft[data.path] = [item.iteration, item.remaining_time, item.passed_time];
         }
 
-        var params = {chartName: name, index: index, train: data.train, type: type, path: data.path},
-            key = self.getChartKey(params);
+        ['test', 'learn'].forEach(function(type) {
+            var sets = self.meta[data.path][type + '_sets'],
+                metrics = self.meta[data.path][type + '_metrics'];
 
-        if (!self.activeTab) {
-            self.activeTab = key.chartId;
-        }
+            for (var i = 0; i < metrics.length; i++) {
+                var nameOfMetric = metrics[i].name;
 
-        var trace = self.getTrace(parent, params),
-            smoothedTrace = self.getTrace(parent, $.extend({smoothed: true}, params));
+                self.lossFuncs[nameOfMetric] = metrics[i].best_value;
 
-        if (type === 'test') {
-            self.getTrace(parent, $.extend({min: true}, params));
-        }
+                var params = {chartName: nameOfMetric, index: i, train: data.train, type: type, path: data.path},
+                    key = self.getChartKey(params);
 
-        data.chunks.forEach(function(value) {
-            if (typeof value[index] === 'undefined') {
-                return;
+                if (!self.activeTab) {
+                    self.activeTab = key.chartId;
+                }
+
+                var trace = self.getTrace(parent, params),
+                    smoothedTrace = self.getTrace(parent, $.extend({smoothed: true}, params));
+
+                if (type === 'test') {
+                    self.getTrace(parent, $.extend({min: true}, params));
+                }
+
+                for (var j = 0; j < sets.length; j++) {
+                    var nameOfSet = sets[j];
+                    var valuesOfSet = item[nameOfSet];
+                    var pointValue = valuesOfSet[i];
+
+                    var pointIndex = item.iteration;
+
+                    if (pointValue !== 'inf' && pointValue !== 'nan') {
+                        trace.x[pointIndex] = pointIndex;
+                        trace.y[pointIndex] = valuesOfSet[i];
+                        trace.hovertext[pointIndex] = valuesOfSet[i].toPrecision(7);
+
+                        smoothedTrace.x[pointIndex] = pointIndex;
+                    }
+                }
+
+                self.chartsToRedraw[key.chartId] = true;
+
+                self.redrawAll();
             }
-
-            var pointIndex = value[iterIndex];
-
-            trace.x[pointIndex] = pointIndex;
-            trace.y[pointIndex] = value[index];
-            trace.hovertext[pointIndex] = value[index].toPrecision(7);
-
-            smoothedTrace.x[pointIndex] = value[iterIndex];
         });
-
-        self.chartsToRedraw[key.chartId] = true;
-
-        self.redrawAll();
     });
 };
 
@@ -640,7 +648,8 @@ CatboostIpython.prototype.getTrace = function(parent, params) {
                     _initial_color: color
                 },
                 mode: 'lines',
-                hoveron: 'points'
+                hoveron: 'points',
+                connectgaps: true
             };
 
         if (params.min) {
@@ -733,20 +742,22 @@ CatboostIpython.prototype.drawSeries = function() {
 };
 
 CatboostIpython.prototype.drawSerie = function(name, hash) {
-    var id = 'catboost-serie-' + this.index + '-' + hash.index,
-        html = '<div id="' + id + '" class="catboost-panel__serie" style="color:' + hash.series.learn.line._initial_color + '">' +
+    var serieColor = hash.series.learn ? hash.series.learn.line._initial_color : (hash.series.test ? hash.series.test.line._initial_color : '#000000'),
+        path = hash.series.learn ? hash.series.learn._params.path : hash.series.test._params.path,
+        id = 'catboost-serie-' + this.index + '-' + hash.index,
+        html = '<div id="' + id + '" class="catboost-panel__serie" style="color:' + serieColor + '">' +
                     '<div class="catboost-panel__serie_top">' +
                         '<input type="checkbox" data-seriename="' + name + '" class="catboost-panel__serie_checkbox" id="' + id + '-box" ' + (!this.layoutDisabled.series[name] ? 'checked="checked"' : '') + '></input>' +
-                        '<label title=' + this.meta[hash.series.learn._params.path].name + ' for="' + id + '-box" class="catboost-panel__serie_label">' + name + '<div class="catboost-panel__serie_time_left" title="Estimate time"></div></label>' +
+                        '<label title=' + this.meta[path].name + ' for="' + id + '-box" class="catboost-panel__serie_label">' + name + '<div class="catboost-panel__serie_time_left" title="Estimate time"></div></label>' +
                         '<div class="catboost-panel__serie_time">' +
                             '<div class="catboost-panel__serie_time_spend" title="Time spend"></div>' +
                         '</div>' +
                     '</div>' +
                     '<div class="catboost-panel__serie_middle catboost-panel__serie__learn_hint">' +
                         '<div class="catboost-panel__serie_hint">curr</div>' +
-                        '<div class="catboost-panel__serie_learn_pic" style="border-color:' + hash.series.learn.line._initial_color + '"></div>' +
+                        '<div class="catboost-panel__serie_learn_pic" style="border-color:' + serieColor + '"></div>' +
                         '<div class="catboost-panel__serie_learn_value"></div>' +
-                        '<div class="catboost-panel__serie_test_pic" style="border-color:' + hash.series.learn.line._initial_color + '"></div>' +
+                        '<div class="catboost-panel__serie_test_pic" style="border-color:' + serieColor + '"></div>' +
                         '<div class="catboost-panel__serie_test_value"></div>' +
                         '<div class="catboost-panel__serie_iteration" title="curr iteration"></div>' +
                     '</div>' +
@@ -793,15 +804,21 @@ CatboostIpython.prototype.getBestValue = function(data, path) {
 
     var best = data[0],
         index = 0,
-        func = this.meta[path]['loss_' + this.traces[this.activeTab].name];
+        func = this.lossFuncs[this.traces[this.activeTab].name],
+        bestDiff = typeof func === 'number' ? Math.abs(data[0] - func) : 0;
 
     for (var i = 1, l = data.length; i < l; i++) {
-        if (func === 'min' && data[i] < best) {
+        if (func === 'Min' && data[i] < best) {
             best = data[i];
             index = i;
         }
 
-        if (func === 'max' && data[i] > best) {
+        if (func === 'Max' && data[i] > best) {
+            best = data[i];
+            index = i;
+        }
+
+        if (typeof func === 'number' && Math.abs(data[i] - func) < bestDiff) {
             best = data[i];
             index = i;
         }
@@ -871,13 +888,13 @@ CatboostIpython.prototype.updateSerieValues = function(name, hash, iteration, cl
         $('#' + id + ' .catboost-panel__serie_test_value', this.layout).html(this.formatItemValue(testValue, index, 'test '));
         $('#' + id + ' .catboost-panel__serie_iteration', this.layout).html(index);
 
-        if (this.timeLeft[path][learnData.length - 1]) {
-            timeLeft = Math.ceil(Number(this.timeLeft[path][learnData.length - 1][1]) / 1000) * 1000;
+        if (this.timeLeft[path] && this.timeLeft[path][learnData.length - 1]) {
+            timeLeft = this.timeLeft[path][learnData.length - 1][1];
         }
         $('#' + id + ' .catboost-panel__serie_time_left', this.layout).html(timeLeft ? ('~' + this.convertTime(timeLeft)) : '');
 
-        if (this.timeLeft[path][index]) {
-            timeSpend = Math.ceil(Number(this.timeLeft[path][index][2]) / 1000) * 1000;
+        if (this.timeLeft[path] && this.timeLeft[path][index]) {
+            timeSpend = this.timeLeft[path][index][2];
         }
 
         $('#' + id + ' .catboost-panel__serie_time_spend', this.layout).html(this.convertTime(timeSpend));
