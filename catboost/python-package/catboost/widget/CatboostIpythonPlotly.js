@@ -185,7 +185,7 @@ CatboostIpython.prototype.addLayout = function(parent) {
                                 '<input type="checkbox" class="catboost-panel__controls_checkbox" id="catboost-control-learn' + this.index + '" checked="checked"></input>' +
                                 '<label for="catboost-control-learn' + this.index + '" class="catboost-panel__controls_label"><div class="catboost-panel__serie_learn_pic" style="border-color:#999"></div>Learn</label>' +
                                 '<input type="checkbox" class="catboost-panel__controls_checkbox" id="catboost-control-test' + this.index + '" checked="checked"></input>' +
-                                '<label for="catboost-control-test' + this.index + '" class="catboost-panel__controls_label"><div class="catboost-panel__serie_test_pic" style="border-color:#999"></div>Test</label>' +
+                                '<label for="catboost-control-test' + this.index + '" class="catboost-panel__controls_label"><div class="catboost-panel__serie_test_pic" style="border-color:#999"></div>Eval</label>' +
                             '</div>' +
                             '<div class="catboost-panel__series">' +
                             '</div>' +
@@ -478,7 +478,7 @@ CatboostIpython.prototype.addPoints = function(parent, data) {
             for (var i = 0; i < metrics.length; i++) {
                 var nameOfMetric = metrics[i].name;
 
-                self.lossFuncs[nameOfMetric] = metrics[i].value;
+                self.lossFuncs[nameOfMetric] = metrics[i].best_value;
 
                 var params = {chartName: nameOfMetric, index: i, train: data.train, type: type, path: data.path},
                     key = self.getChartKey(params);
@@ -515,47 +515,6 @@ CatboostIpython.prototype.addPoints = function(parent, data) {
                 self.redrawAll();
             }
         });
-    });
-
-    return;
-
-
-    data.fields.forEach(function(name, index) {
-        if (name === 'iter') {
-            return;
-        }
-
-        var params = {chartName: name, index: index, train: data.train, type: type, path: data.path},
-            key = self.getChartKey(params);
-
-        if (!self.activeTab) {
-            self.activeTab = key.chartId;
-        }
-
-        var trace = self.getTrace(parent, params),
-            smoothedTrace = self.getTrace(parent, $.extend({smoothed: true}, params));
-
-        if (type === 'test') {
-            self.getTrace(parent, $.extend({min: true}, params));
-        }
-
-        data.chunks.forEach(function(value) {
-            if (typeof value[index] === 'undefined') {
-                return;
-            }
-
-            var pointIndex = value[iterIndex];
-
-            trace.x[pointIndex] = pointIndex;
-            trace.y[pointIndex] = value[index];
-            trace.hovertext[pointIndex] = value[index].toPrecision(7);
-
-            smoothedTrace.x[pointIndex] = value[iterIndex];
-        });
-
-        self.chartsToRedraw[key.chartId] = true;
-
-        self.redrawAll();
     });
 };
 
@@ -783,20 +742,22 @@ CatboostIpython.prototype.drawSeries = function() {
 };
 
 CatboostIpython.prototype.drawSerie = function(name, hash) {
-    var id = 'catboost-serie-' + this.index + '-' + hash.index,
-        html = '<div id="' + id + '" class="catboost-panel__serie" style="color:' + hash.series.learn.line._initial_color + '">' +
+    var serieColor = hash.series.learn ? hash.series.learn.line._initial_color : (hash.series.test ? hash.series.test.line._initial_color : '#000000'),
+        path = hash.series.learn ? hash.series.learn._params.path : hash.series.test._params.path,
+        id = 'catboost-serie-' + this.index + '-' + hash.index,
+        html = '<div id="' + id + '" class="catboost-panel__serie" style="color:' + serieColor + '">' +
                     '<div class="catboost-panel__serie_top">' +
                         '<input type="checkbox" data-seriename="' + name + '" class="catboost-panel__serie_checkbox" id="' + id + '-box" ' + (!this.layoutDisabled.series[name] ? 'checked="checked"' : '') + '></input>' +
-                        '<label title=' + this.meta[hash.series.learn._params.path].name + ' for="' + id + '-box" class="catboost-panel__serie_label">' + name + '<div class="catboost-panel__serie_time_left" title="Estimate time"></div></label>' +
+                        '<label title=' + this.meta[path].name + ' for="' + id + '-box" class="catboost-panel__serie_label">' + name + '<div class="catboost-panel__serie_time_left" title="Estimate time"></div></label>' +
                         '<div class="catboost-panel__serie_time">' +
                             '<div class="catboost-panel__serie_time_spend" title="Time spend"></div>' +
                         '</div>' +
                     '</div>' +
                     '<div class="catboost-panel__serie_middle catboost-panel__serie__learn_hint">' +
                         '<div class="catboost-panel__serie_hint">curr</div>' +
-                        '<div class="catboost-panel__serie_learn_pic" style="border-color:' + hash.series.learn.line._initial_color + '"></div>' +
+                        '<div class="catboost-panel__serie_learn_pic" style="border-color:' + serieColor + '"></div>' +
                         '<div class="catboost-panel__serie_learn_value"></div>' +
-                        '<div class="catboost-panel__serie_test_pic" style="border-color:' + hash.series.learn.line._initial_color + '"></div>' +
+                        '<div class="catboost-panel__serie_test_pic" style="border-color:' + serieColor + '"></div>' +
                         '<div class="catboost-panel__serie_test_value"></div>' +
                         '<div class="catboost-panel__serie_iteration" title="curr iteration"></div>' +
                     '</div>' +
@@ -843,15 +804,21 @@ CatboostIpython.prototype.getBestValue = function(data, path) {
 
     var best = data[0],
         index = 0,
-        func = this.lossFuncs[this.traces[this.activeTab].name];
+        func = this.lossFuncs[this.traces[this.activeTab].name],
+        bestDiff = typeof func === 'number' ? Math.abs(data[0] - func) : 0;
 
     for (var i = 1, l = data.length; i < l; i++) {
-        if (func === 'min' && data[i] < best) {
+        if (func === 'Min' && data[i] < best) {
             best = data[i];
             index = i;
         }
 
-        if (func === 'max' && data[i] > best) {
+        if (func === 'Max' && data[i] > best) {
+            best = data[i];
+            index = i;
+        }
+
+        if (typeof func === 'number' && Math.abs(data[i] - func) < bestDiff) {
             best = data[i];
             index = i;
         }
