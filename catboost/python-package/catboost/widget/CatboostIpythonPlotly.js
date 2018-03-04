@@ -31,7 +31,7 @@ function throttle(fn, timeout, invokeAsap, ctx) {
                 timer = setTimeout(wrapper, timeout);
         }
     };
-};
+}
 
 /* eslint-enable */
 function CatboostIpython() {
@@ -56,27 +56,42 @@ CatboostIpython.prototype.init = function() {
                 parent: "div",
                 traces: [
                     {
-                        name: "1_learn",
+                        name: "current;learn;0;;;",
                         x: [],
                         y: []
                     },
                     {
-                        name: "1_learn__smoothed__",
+                        name: "current;learn;0;smoothed;;",
                         x: [],
                         y: []
                     },
                     {
-                        name: "1_test",
+                        name: "current;learn;1;;;",
                         x: [],
                         y: []
                     },
                     {
-                        name: "1_test__smoothed__",
+                        name: "current;learn;1;smoothed;;",
                         x: [],
                         y: []
                     },
                     {
-                        name: "1_test__min__",
+                        name: "current;test;0;;;",
+                        x: [],
+                        y: []
+                    },
+                    {
+                        name: "current;test;0;smoothed;;",
+                        x: [],
+                        y: []
+                    },
+                    {
+                        name: "current;test;0;;best_point;",
+                        x: [],
+                        y: []
+                    },
+                    {
+                        name: "current;test;0;;;best_value",
                         x: [],
                         y: []
                     }
@@ -89,7 +104,8 @@ CatboostIpython.prototype.init = function() {
     this.lastIndexes = {};
     this.smoothness = -1;
     this.layoutDisabled = {
-        series: {}
+        series: {},
+        traces: {}
     };
     this.clickMode = false;
     this.logarithmMode = 'linear';
@@ -359,6 +375,46 @@ CatboostIpython.prototype.updateSeriesVisibility = function() {
     }
 };
 
+CatboostIpython.prototype.updateTracesVisibility = function() {
+    var tracesHash = this.groupTraces(),
+        traces,
+        self = this;
+
+    for (var train in tracesHash) {
+        if (tracesHash.hasOwnProperty(train)) {
+            traces = tracesHash[train].traces;
+
+            if (this.layoutDisabled.traces[train]) {
+                traces.forEach(function(trace) {
+                    self.setSerieVisibility(trace, false);
+                });
+            } else {
+                traces.forEach(function(trace) {
+                    self.setSerieVisibility(trace, true);
+                });
+
+                if (this.getSmoothness() === -1) {
+                    self.filterTracesOne(traces, {smoothed: true}).forEach(function(trace) {
+                        self.setSerieVisibility(trace, false);
+                    });
+                }
+
+                if (this.layoutDisabled['learn']) {
+                    self.filterTracesOne(traces, {type: 'learn'}).forEach(function(trace) {
+                        self.setSerieVisibility(trace, false);
+                    });
+                }
+
+                if (this.layoutDisabled['test']) {
+                    self.filterTracesOne(traces, {type: 'test'}).forEach(function(trace) {
+                        self.setSerieVisibility(trace, false);
+                    });
+                }
+            }
+        }
+    }
+};
+
 CatboostIpython.prototype.getSmoothness = function() {
     return this.smoothness && this.smoothness > -1 ? this.smoothness : -1;
 };
@@ -439,16 +495,16 @@ CatboostIpython.prototype.redraw = function() {
     if (this.chartsToRedraw[this.activeTab]) {
         this.chartsToRedraw[this.activeTab] = false;
 
-        this.updateSeriesVisibility();
-        this.updateSeriesMin();
-        this.updateSeriesValues();
+        this.updateTracesVisibility();
+        this.updateTracesBest();
+        this.updateTracesValues();
 
-        this.calcSmoothSeries();
+        //this.calcSmoothSeries();
 
         this.plotly.redraw(this.traces[this.activeTab].parent);
     }
 
-    this.drawSeries();
+    this.drawTraces();
 };
 
 CatboostIpython.prototype.addRedrawFunc = function() {
@@ -480,26 +536,38 @@ CatboostIpython.prototype.addPoints = function(parent, data) {
 
                 self.lossFuncs[nameOfMetric] = metrics[i].best_value;
 
-                var params = {chartName: nameOfMetric, index: i, train: data.train, type: type, path: data.path},
-                    key = self.getChartKey(params);
-
-                if (!self.activeTab) {
-                    self.activeTab = key.chartId;
-                }
-
-                var trace = self.getTrace(parent, params),
-                    smoothedTrace = self.getTrace(parent, $.extend({smoothed: true}, params));
-
-                if (type === 'test') {
-                    self.getTrace(parent, $.extend({min: true}, params));
-                }
-
                 for (var j = 0; j < sets.length; j++) {
-                    var nameOfSet = sets[j];
-                    var valuesOfSet = item[nameOfSet];
-                    var pointValue = valuesOfSet[i];
+                    var nameOfSet = sets[j],
+                        params = {
+                            chartName: nameOfMetric,
+                            index: i,
+                            train: data.train,
+                            type: type,
+                            path: data.path,
+                            indexOfSet: j,
+                            nameOfSet: nameOfSet
+                        },
+                        key = self.getKey(params);
 
-                    var pointIndex = item.iteration;
+                    if (!self.activeTab) {
+                        self.activeTab = key.chartId;
+                    }
+
+                    var valuesOfSet = item[nameOfSet],
+                        pointValue = valuesOfSet[i],
+                        pointIndex = item.iteration,
+                        // traces
+                        trace = self.getTrace(parent, params),
+                        smoothedTrace = self.getTrace(parent, $.extend({smoothed: true}, params)),
+                        bestValueTrace = null;
+
+                    if (type === 'test') {
+                        self.getTrace(parent, $.extend({best_point: true}, params));
+
+                        if (typeof self.lossFuncs[nameOfMetric] === 'number') {
+                            bestValueTrace = self.getTrace(parent, $.extend({best_value: true}, params));
+                        }
+                    }
 
                     if (pointValue !== 'inf' && pointValue !== 'nan') {
                         trace.x[pointIndex] = pointIndex;
@@ -507,6 +575,11 @@ CatboostIpython.prototype.addPoints = function(parent, data) {
                         trace.hovertext[pointIndex] = valuesOfSet[i].toPrecision(7);
 
                         smoothedTrace.x[pointIndex] = pointIndex;
+                    }
+
+                    if (bestValueTrace) {
+                        bestValueTrace.x[pointIndex] = pointIndex;
+                        bestValueTrace.y[pointIndex] = self.lossFuncs[nameOfMetric];
                     }
                 }
 
@@ -607,11 +680,11 @@ CatboostIpython.prototype.getChart = function(parent, params) {
     this.charts[id] = this.plotly.plot(chartNode[0], this.traces[id].traces, this.traces[id].layout, this.traces[id].options);
 
     chartNode[0].on('plotly_hover', function(e) {
-        self.updateSeriesValues(e.points[0].x);
+        //self.updateSeriesValues(e.points[0].x);
     });
 
     chartNode[0].on('plotly_click', function(e) {
-        self.updateSeriesValues(e.points[0].x, true);
+        //self.updateSeriesValues(e.points[0].x, true);
     });
 
     return this.charts[id];
@@ -619,12 +692,12 @@ CatboostIpython.prototype.getChart = function(parent, params) {
 
 
 CatboostIpython.prototype.getTrace = function(parent, params) {
-    var key = this.getChartKey(params),
+    var key = this.getKey(params),
         chartSeries = [];
 
     if (this.traces[key.chartId]) {
         chartSeries = this.traces[key.chartId].traces.filter(function(trace) {
-            return trace.name === key.seriesId;
+            return trace.name === key.traceName;
         });
     }
 
@@ -635,7 +708,7 @@ CatboostIpython.prototype.getTrace = function(parent, params) {
 
         var color = this.getNextColor(params.path, params.smoothed ? 0.1 : 1),
             trace = {
-                name: key.seriesId,
+                name: key.traceName,
                 _params: params,
                 x: [],
                 y: [],
@@ -652,9 +725,9 @@ CatboostIpython.prototype.getTrace = function(parent, params) {
                 connectgaps: true
             };
 
-        if (params.min) {
+        if (params.best_point) {
             trace = {
-                name: key.seriesId,
+                name: key.traceName,
                 _params: params,
                 x: [],
                 y: [],
@@ -670,18 +743,78 @@ CatboostIpython.prototype.getTrace = function(parent, params) {
             };
         }
 
+        if (params.best_value) {
+            trace = {
+                name: key.traceName,
+                _params: params,
+                x: [],
+                y: [],
+                line: {
+                    width: 1,
+                    dash: 'dash',
+                    color: color,
+                    _initial_color: color
+                },
+                mode: 'lines',
+                connectgaps: true,
+                hoverinfo: 'skip'
+            };
+        }
+
         this.traces[key.chartId].traces.push(trace);
 
         return trace;
     }
 };
 
-CatboostIpython.prototype.getChartKey = function(params) {
+CatboostIpython.prototype.getKey = function(params) {
+    var traceName = [
+        params.train,
+        params.type,
+        params.indexOfSet,
+        (params.smoothed ? 'smoothed' : ''),
+        (params.best_point ? 'best_pount' : ''),
+        (params.best_value ? 'best_value' : '')
+    ].join(';');
+
     return {
         chartId: params.chartName + ' ' + params.index,
         seriesId: params.train + ' ' + params.type + (params.min ? '__min__' : '') + (params.smoothed ? '__smoothed__' : ''),
+        traceName: traceName,
         colorId: params.train
     };
+};
+
+CatboostIpython.prototype.filterTracesEvery = function(traces, filter) {
+    traces = traces || this.traces[this.activeTab].traces;
+
+    return traces.filter(function(trace) {
+        for (var prop in filter) {
+            if (filter.hasOwnProperty(prop)) {
+                if (filter[prop] !== trace._params[prop]) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    });
+};
+
+CatboostIpython.prototype.filterTracesOne = function(traces, filter) {
+    traces = traces || this.traces[this.activeTab].traces;
+
+    return traces.filter(function(trace) {
+        for (var prop in filter) {
+            if (filter.hasOwnProperty(prop)) {
+                if (filter[prop] === trace._params[prop]) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    });
 };
 
 CatboostIpython.prototype.cleanSeries = function() {
@@ -743,7 +876,7 @@ CatboostIpython.prototype.drawSeries = function() {
 
 CatboostIpython.prototype.drawSerie = function(name, hash) {
     var serieColor = hash.series.learn ? hash.series.learn.line._initial_color : (hash.series.test ? hash.series.test.line._initial_color : '#000000'),
-        path = hash.series.learn ? hash.series.learn._params.path : hash.series.test._params.path,
+        path = this.getSeriesPath(hash),
         id = 'catboost-serie-' + this.index + '-' + hash.index,
         html = '<div id="' + id + '" class="catboost-panel__serie" style="color:' + serieColor + '">' +
                     '<div class="catboost-panel__serie_top">' +
@@ -774,6 +907,122 @@ CatboostIpython.prototype.drawSerie = function(name, hash) {
     return html;
 };
 
+CatboostIpython.prototype.groupTraces = function() {
+    var traces = this.traces[this.activeTab].traces,
+        index = 0,
+        tracesHash = {};
+
+    traces.map(function(trace) {
+        var train = trace._params.train;
+
+        if (!tracesHash[train]) {
+            tracesHash[train] = {
+                index: index,
+                traces: []
+            };
+
+            index++;
+        }
+
+        tracesHash[train].traces.push(trace);
+    });
+
+    return tracesHash;
+};
+
+CatboostIpython.prototype.drawTraces = function() {
+    if ($('.catboost-panel__series .catboost-panel__serie', this.layout).length) {
+        return;
+    }
+
+    var html = '',
+        tracesHash = this.groupTraces();
+
+    for (var train in tracesHash) {
+        if (tracesHash.hasOwnProperty(train)) {
+            html += this.drawTrace(train, tracesHash[train]);
+        }
+    }
+
+    $('.catboost-panel__series', this.layout).html(html);
+
+    this.updateTracesValues();
+
+    //this.addTracesEvents();
+};
+
+CatboostIpython.prototype.drawTrace = function(train, hash) {
+    var info = this.getTracesInfo(hash.traces),
+        id = 'catboost-serie-' + this.index + '-' + hash.index,
+        traces = {
+            learn: this.filterTracesEvery(hash.traces, {
+                type: 'learn',
+                smoothed: undefined,
+                best_point: undefined,
+                best_value: undefined
+            }),
+            test: this.filterTracesEvery(hash.traces, {
+                type: 'test',
+                smoothed: undefined,
+                best_point: undefined,
+                best_value: undefined
+            })
+        },
+        items = {
+            learn: {
+                middle: '',
+                bottom: ''
+            },
+            test: {
+                middle: '',
+                bottom: ''
+            }
+        },
+        tracesNames = '';
+
+    ['learn', 'test'].forEach(function(type) {
+        traces[type].forEach(function(trace) {
+            items[type].middle += '<div class="catboost-panel__serie_' + type + '_pic" style="border-color:' + info.color + '"></div>' +
+                                  '<div data-index="' + trace._params.indexOfSet + '" class="catboost-panel__serie_' + type + '_value"></div>';
+
+            items[type].bottom += '<div class="catboost-panel__serie_' + type + '_pic" style="border-color:transparent"></div>' +
+                                  '<div data-index="' + trace._params.indexOfSet + '" class="catboost-panel__serie_best_' + type + '_value"></div>';
+
+            tracesNames += '<div class="catboost-panel__serie_' + type + '_pic" style="border-color:' + info.color + '"></div>' +
+                           '<div class="catboost-panel__serie_name">' + trace._params.nameOfSet + '</div>';
+        });
+    });
+    
+    var html = '<div id="' + id + '" class="catboost-panel__serie" style="color:' + info.color + '">' +
+                    '<div class="catboost-panel__serie_top">' +
+                        '<input type="checkbox" data-seriename="' + train + '" class="catboost-panel__serie_checkbox" id="' + id + '-box" ' + (!this.layoutDisabled.series[train] ? 'checked="checked"' : '') + '></input>' +
+                        '<label title=' + this.meta[info.path].name + ' for="' + id + '-box" class="catboost-panel__serie_label">' + train + '<div class="catboost-panel__serie_time_left" title="Estimate time"></div></label>' +
+                        '<div class="catboost-panel__serie_time">' +
+                            '<div class="catboost-panel__serie_time_spend" title="Time spend"></div>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="catboost-panel__serie_hint catboost-panel__serie__learn_hint">curr</div>' +
+                    '<div class="catboost-panel__serie_hint catboost-panel__serie__test_hint">best</div>' +
+                    '<div class="catboost-panel__serie_iteration" title="curr iteration"></div>' +
+                    '<div class="catboost-panel__serie_best_iteration" title="best iteration"></div>' +
+                    '<div class="catboost-panel__serie_scroll">' +
+                        '<div class="catboost-panel__serie_names">' +
+                            tracesNames +
+                        '</div>' +
+                        '<div class="catboost-panel__serie_middle">' +
+                            items.learn.middle +
+                            items.test.middle +
+                        '</div>' +
+                        '<div class="catboost-panel__serie_bottom">' +
+                            items.learn.bottom +
+                            items.test.bottom +
+                        '</div>' +
+                    '</div>' +
+                '</div>';
+
+    return html;
+};
+
 CatboostIpython.prototype.updateSeriesValues = function(iteration, click) {
     var seriesHash = this.groupSeries();
 
@@ -783,7 +1032,7 @@ CatboostIpython.prototype.updateSeriesValues = function(iteration, click) {
         }
     }
 };
-
+/*
 CatboostIpython.prototype.updateSeriesMin = function() {
     var seriesHash = this.groupSeries();
 
@@ -793,8 +1042,28 @@ CatboostIpython.prototype.updateSeriesMin = function() {
         }
     }
 };
+*/
+CatboostIpython.prototype.updateTracesValues = function(iteration, click) {
+    var tracesHash = this.groupTraces();
 
-CatboostIpython.prototype.getBestValue = function(data, path) {
+    for (var train in tracesHash) {
+        if (tracesHash.hasOwnProperty(train) && !this.layoutDisabled.traces[train]) {
+            this.updateTraceValues(train, tracesHash[train], iteration, click);
+        }
+    }
+};
+
+CatboostIpython.prototype.updateTracesBest = function() {
+    var tracesHash = this.groupTraces();
+
+    for (var train in tracesHash) {
+        if (tracesHash.hasOwnProperty(train) && !this.layoutDisabled.traces[train]) {
+            this.updateTraceBest(train, tracesHash[train]);
+        }
+    }
+};
+
+CatboostIpython.prototype.getBestValue = function(data) {
     if (!data.length) {
         return {
             best: undefined,
@@ -820,6 +1089,7 @@ CatboostIpython.prototype.getBestValue = function(data, path) {
 
         if (typeof func === 'number' && Math.abs(data[i] - func) < bestDiff) {
             best = data[i];
+            bestDiff = Math.abs(data[i] - func);
             index = i;
         }
     }
@@ -841,6 +1111,7 @@ CatboostIpython.prototype.formatItemValue = function(value, index, suffix) {
     return '<span title="' + suffix + 'value ' + value + '">' + value + '</span>';
 };
 
+/*
 CatboostIpython.prototype.updateSerieMin = function(name, hash) {
     if (!(hash.series.test && hash.series.test__min__)) {
         return;
@@ -858,6 +1129,30 @@ CatboostIpython.prototype.updateSerieMin = function(name, hash) {
     hash.series.test__min__.y[0] = testBestValue.best;
     hash.series.test__min__.hovertext[0] = testBestValue.func + ': ' + testBestValue.index + ' ' + testBestValue.best;
 };
+*/
+
+CatboostIpython.prototype.updateTraceBest = function(train, hash) {
+    var traces = this.filterTracesOne(hash.traces, {best_point: true}),
+        self = this;
+
+    traces.forEach(function(trace) {
+        // looking for correspond test trace
+        var testTrace = self.filterTracesEvery(hash.traces, {
+                type: 'test',
+                indexOfSet: trace._params.indexOfSet,
+                smoothed: undefined,
+                best_point: undefined,
+                best_value: undefined
+            }),
+            bestValue = self.getBestValue(testTrace.length === 1 ? testTrace[0].y : []);
+
+        if (bestValue.index !== -1) {
+            trace.x[0] = bestValue.index;
+            trace.y[0] = bestValue.best;
+            trace.hovertext[0] = bestValue.func + ' (' + trace._params.nameOfSet + '): ' + bestValue.index + ' ' + bestValue.best;
+        }
+    });
+};
 
 CatboostIpython.prototype.getSeriesPath = function(hash) {
     if (hash.series.test) {
@@ -867,6 +1162,27 @@ CatboostIpython.prototype.getSeriesPath = function(hash) {
     if (hash.series.learn) {
         return hash.series.learn._params.path;
     }
+};
+
+CatboostIpython.prototype.getTracesInfo = function(traces) {
+    var info = {
+        path: '',
+        color: ''
+    };
+
+    traces.forEach(function(trace) {
+        if (!info.path) {
+            info.path = trace._params.path || '';
+        }
+
+        if (!info.color) {
+            info.color = !trace._params.smoothed && trace.line ? trace.line._initial_color : '';
+        }
+    });
+
+    info.color = info.color || '#000000';
+
+    return info;
 };
 
 CatboostIpython.prototype.updateSerieValues = function(name, hash, iteration, click) {
@@ -911,6 +1227,71 @@ CatboostIpython.prototype.updateSerieValues = function(name, hash, iteration, cl
     }
 };
 
+CatboostIpython.prototype.updateTraceValues = function(name, hash, iteration, click) {
+    var id = 'catboost-serie-' + this.index + '-' + hash.index,
+        traces = {
+            learn: this.filterTracesEvery(hash.traces, {
+                type: 'learn',
+                smoothed: undefined,
+                best_point: undefined,
+                best_value: undefined
+            }),
+            test: this.filterTracesEvery(hash.traces, {
+                type: 'test',
+                smoothed: undefined,
+                best_point: undefined,
+                best_value: undefined
+            })
+        },
+        path = this.getTracesInfo(hash.traces),
+        self = this;
+
+    ['learn', 'test'].forEach(function(type) {
+        traces[type].forEach(function(trace) {
+            var data = trace.y || [],
+                index = typeof iteration !== 'undefined' && iteration < data.length - 1 ? iteration : data.length - 1,
+                value = data.length ? data[index] : undefined,
+                testTrace = self.filterTracesEvery(hash.traces, {
+                    type: 'test',
+                    indexOfSet: trace._params.indexOfSet,
+                    smoothed: undefined,
+                    best_point: undefined,
+                    best_value: undefined
+                }),
+                bestValue = self.getBestValue(testTrace.length === 1 ? testTrace[0].y : []),
+                timeLeft = '',
+                timeSpend = '';
+
+            if (click || !self.clickMode) {
+                $('#' + id + ' .catboost-panel__serie_' + type + '_value[data-index=' + trace._params.indexOfSet + ']', self.layout)
+                    .html(self.formatItemValue(value, index, type + ' '));
+                $('#' + id + ' .catboost-panel__serie_iteration', self.layout).html(index);
+
+                if (self.timeLeft[path] && self.timeLeft[path][data.length - 1]) {
+                    timeLeft = self.timeLeft[path][data.length - 1][1];
+                }
+                $('#' + id + ' .catboost-panel__serie_time_left', self.layout).html(timeLeft ? ('~' + self.convertTime(timeLeft)) : '');
+
+                if (self.timeLeft[path] && self.timeLeft[path][index]) {
+                    timeSpend = self.timeLeft[path][index][2];
+                }
+
+                $('#' + id + ' .catboost-panel__serie_time_spend', self.layout).html(self.convertTime(timeSpend));
+                $('#' + id + ' .catboost-panel__serie_best_iteration', self.layout).html(bestValue.index > -1 ? bestValue.index : '');
+
+                $('#' + id + ' .catboost-panel__serie_best_test_value[data-index=' + trace._params.indexOfSet + ']', self.layout)
+                    .html(self.formatItemValue(bestValue.best, bestValue.index, 'best ' + trace._params.nameOfSet + ' '));
+            }
+        });
+    });
+
+    if (click) {
+        this.clickMode = true;
+
+        $('#catboost-control2-clickmode' + this.index, this.layout)[0].checked = true;
+    }
+};
+
 CatboostIpython.prototype.addSeriesEvents = function() {
     var self = this;
 
@@ -921,6 +1302,11 @@ CatboostIpython.prototype.addSeriesEvents = function() {
 
         self.redrawActiveChart();
     });
+};
+
+
+CatboostIpython.prototype.addTracesEvents = function() {
+
 };
 
 CatboostIpython.prototype.getNextColor = function(path, opacity) {
