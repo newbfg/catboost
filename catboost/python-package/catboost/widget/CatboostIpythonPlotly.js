@@ -1021,7 +1021,7 @@ CatboostIpython.prototype.drawTrace = function(train, hash) {
                                   '<div data-index="' + trace._params.indexOfSet + '" class="catboost-panel__serie_best_' + type + '_value"></div>';
 
             tracesNames += '<div class="catboost-panel__serie_' + type + '_pic" style="border-color:' + info.color + '"></div>' +
-                           '<div class="catboost-panel__serie_name">' + trace._params.nameOfSet + '</div>';
+                           '<div class="catboost-panel__serie_' + type + '_name">' + trace._params.nameOfSet + '</div>';
         });
     });
     
