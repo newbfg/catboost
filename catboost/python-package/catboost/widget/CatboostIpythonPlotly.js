@@ -711,11 +711,11 @@ CatboostIpython.prototype.getChart = function(parent, params) {
     this.charts[id] = this.plotly.plot(chartNode[0], this.traces[id].traces, this.traces[id].layout, this.traces[id].options);
 
     chartNode[0].on('plotly_hover', function(e) {
-        //self.updateSeriesValues(e.points[0].x);
+        self.updateTracesValues(e.points[0].x);
     });
 
     chartNode[0].on('plotly_click', function(e) {
-        //self.updateSeriesValues(e.points[0].x, true);
+        self.updateTracesValues(e.points[0].x, true);
     });
 
     return this.charts[id];
@@ -980,7 +980,7 @@ CatboostIpython.prototype.drawTraces = function() {
 
     this.updateTracesValues();
 
-    //this.addTracesEvents();
+    this.addTracesEvents();
 };
 
 CatboostIpython.prototype.drawTrace = function(train, hash) {
@@ -1054,7 +1054,7 @@ CatboostIpython.prototype.drawTrace = function(train, hash) {
 
     return html;
 };
-
+/*
 CatboostIpython.prototype.updateSeriesValues = function(iteration, click) {
     var seriesHash = this.groupSeries();
 
@@ -1064,6 +1064,7 @@ CatboostIpython.prototype.updateSeriesValues = function(iteration, click) {
         }
     }
 };
+*/
 /*
 CatboostIpython.prototype.updateSeriesMin = function() {
     var seriesHash = this.groupSeries();
@@ -1185,7 +1186,7 @@ CatboostIpython.prototype.updateTraceBest = function(train, hash) {
         }
     });
 };
-
+/*
 CatboostIpython.prototype.getSeriesPath = function(hash) {
     if (hash.series.test) {
         return hash.series.test._params.path;
@@ -1195,6 +1196,7 @@ CatboostIpython.prototype.getSeriesPath = function(hash) {
         return hash.series.learn._params.path;
     }
 };
+*/
 
 CatboostIpython.prototype.getTracesInfo = function(traces) {
     var info = {
@@ -1216,7 +1218,7 @@ CatboostIpython.prototype.getTracesInfo = function(traces) {
 
     return info;
 };
-
+/*
 CatboostIpython.prototype.updateSerieValues = function(name, hash, iteration, click) {
     var id = 'catboost-serie-' + this.index + '-' + hash.index,
         learn = hash.series.learn,
@@ -1258,6 +1260,7 @@ CatboostIpython.prototype.updateSerieValues = function(name, hash, iteration, cl
         $('#catboost-control2-clickmode' + this.index, this.layout)[0].checked = true;
     }
 };
+*/
 
 CatboostIpython.prototype.updateTraceValues = function(name, hash, iteration, click) {
     var id = 'catboost-serie-' + this.index + '-' + hash.index,
@@ -1324,21 +1327,16 @@ CatboostIpython.prototype.updateTraceValues = function(name, hash, iteration, cl
     }
 };
 
-CatboostIpython.prototype.addSeriesEvents = function() {
+CatboostIpython.prototype.addTracesEvents = function() {
     var self = this;
 
     $('.catboost-panel__serie_checkbox', this.layout).click(function() {
         var name = $(this).data('seriename');
 
-        self.layoutDisabled.series[name] = !$(this)[0].checked;
+        self.layoutDisabled.traces[name] = !$(this)[0].checked;
 
         self.redrawActiveChart();
     });
-};
-
-
-CatboostIpython.prototype.addTracesEvents = function() {
-
 };
 
 CatboostIpython.prototype.getNextColor = function(path, opacity) {
