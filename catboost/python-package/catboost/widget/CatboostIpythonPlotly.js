@@ -465,14 +465,46 @@ CatboostIpython.prototype.calcSmoothSeries = function() {
     }
 };
 
-CatboostIpython.prototype.highlightSmoothSeries = function(serie, smoothedSerie, flag) {
+CatboostIpython.prototype.updateTracesSmoothness = function() {
+    var tracesHash = this.groupTraces(),
+        traces = this.filterTracesOne(tracesHash.traces, {smoothed: true}),
+        enabled = this.getSmoothness() > -1,
+        self = this;
+
+    traces.forEach(function(trace) {
+        // looking for correspond non-smoothed trace
+        var nonSmoothedTrace = self.filterTracesEvery(tracesHash.traces, {
+                type: trace._params.type,
+                indexOfSet: trace._params.indexOfSet,
+                smoothed: undefined,
+                best_point: undefined,
+                best_value: undefined
+            }),
+            colorFlag = false;
+
+        if (nonSmoothedTrace.length === 1) {
+            nonSmoothedTrace = nonSmoothedTrace[0];
+
+            if (nonSmoothedTrace.visible) {
+                if (enabled) {
+                    self.smoothSeries(nonSmoothedTrace.y, trace);
+                    colorFlag = true;
+                }
+
+                self.highlightSmoothedTrace(nonSmoothedTrace, trace, colorFlag);
+            }
+        }
+    });
+};
+
+CatboostIpython.prototype.highlightSmoothedTrace = function(trace, smoothedTrace, flag) {
     if (flag) {
-        smoothedSerie.line.color = serie.line._initial_color;
-        serie.line.color = smoothedSerie.line._initial_color;
-        serie.hoverinfo = 'skip';
+        smoothedTrace.line.color = trace.line._initial_color;
+        trace.line.color = smoothedTrace.line._initial_color;
+        trace.hoverinfo = 'skip';
     } else {
-        serie.line.color = serie.line._initial_color;
-        serie.hoverinfo = 'text+x';
+        trace.line.color = trace.line._initial_color;
+        trace.hoverinfo = 'text+x';
     }
 };
 
@@ -498,8 +530,7 @@ CatboostIpython.prototype.redraw = function() {
         this.updateTracesVisibility();
         this.updateTracesBest();
         this.updateTracesValues();
-
-        //this.calcSmoothSeries();
+        this.updateTracesSmoothness();
 
         this.plotly.redraw(this.traces[this.activeTab].parent);
     }
@@ -852,7 +883,7 @@ CatboostIpython.prototype.groupSeries = function() {
 
     return seriesHash;
 };
-
+/*
 CatboostIpython.prototype.drawSeries = function() {
     if ($('.catboost-panel__series .catboost-panel__serie', this.layout).length) {
         return;
@@ -906,6 +937,7 @@ CatboostIpython.prototype.drawSerie = function(name, hash) {
 
     return html;
 };
+*/
 
 CatboostIpython.prototype.groupTraces = function() {
     var traces = this.traces[this.activeTab].traces,
