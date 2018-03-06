@@ -324,54 +324,9 @@ CatboostIpython.prototype.addControlEvents = function() {
     });
 };
 
-CatboostIpython.prototype.setSerieVisibility = function(serie, visibility) {
-    if (serie) {
-        serie.visible = visibility;
-    }
-};
-
-CatboostIpython.prototype.updateSeriesVisibility = function() {
-    var seriesHash = this.groupSeries(),
-        series;
-
-    for (var id in seriesHash) {
-        if (seriesHash.hasOwnProperty(id)) {
-            series = seriesHash[id].series;
-
-            if (this.layoutDisabled.series[id]) {
-                this.setSerieVisibility(series.learn, false);
-                this.setSerieVisibility(series.learn__smoothed__, false);
-
-                this.setSerieVisibility(series.test, false);
-                this.setSerieVisibility(series.test__smoothed__, false);
-
-                this.setSerieVisibility(series.test__min__, false);
-            } else {
-                this.setSerieVisibility(series.learn, true);
-                this.setSerieVisibility(series.learn__smoothed__, true);
-
-                this.setSerieVisibility(series.test, true);
-                this.setSerieVisibility(series.test__smoothed__, true);
-
-                this.setSerieVisibility(series.test__min__, true);
-
-                if (this.getSmoothness() === -1) {
-                    this.setSerieVisibility(series.learn__smoothed__, false);
-                    this.setSerieVisibility(series.test__smoothed__, false);
-                }
-
-                if (this.layoutDisabled['learn']) {
-                    this.setSerieVisibility(series.learn, false);
-                    this.setSerieVisibility(series.learn__smoothed__, false);
-                }
-
-                if (this.layoutDisabled['test']) {
-                    this.setSerieVisibility(series.test, false);
-                    this.setSerieVisibility(series.test__smoothed__, false);
-                    this.setSerieVisibility(series.test__min__, false);
-                }
-            }
-        }
+CatboostIpython.prototype.setTraceVisibility = function(trace, visibility) {
+    if (trace) {
+        trace.visible = visibility;
     }
 };
 
@@ -386,28 +341,28 @@ CatboostIpython.prototype.updateTracesVisibility = function() {
 
             if (this.layoutDisabled.traces[train]) {
                 traces.forEach(function(trace) {
-                    self.setSerieVisibility(trace, false);
+                    self.setTraceVisibility(trace, false);
                 });
             } else {
                 traces.forEach(function(trace) {
-                    self.setSerieVisibility(trace, true);
+                    self.setTraceVisibility(trace, true);
                 });
 
                 if (this.getSmoothness() === -1) {
                     self.filterTracesOne(traces, {smoothed: true}).forEach(function(trace) {
-                        self.setSerieVisibility(trace, false);
+                        self.setTraceVisibility(trace, false);
                     });
                 }
 
                 if (this.layoutDisabled['learn']) {
                     self.filterTracesOne(traces, {type: 'learn'}).forEach(function(trace) {
-                        self.setSerieVisibility(trace, false);
+                        self.setTraceVisibility(trace, false);
                     });
                 }
 
                 if (this.layoutDisabled['test']) {
                     self.filterTracesOne(traces, {type: 'test'}).forEach(function(trace) {
-                        self.setSerieVisibility(trace, false);
+                        self.setTraceVisibility(trace, false);
                     });
                 }
             }
@@ -883,61 +838,6 @@ CatboostIpython.prototype.groupSeries = function() {
 
     return seriesHash;
 };
-/*
-CatboostIpython.prototype.drawSeries = function() {
-    if ($('.catboost-panel__series .catboost-panel__serie', this.layout).length) {
-        return;
-    }
-
-    var html = '',
-        seriesHash = this.groupSeries();
-
-    for (var name in seriesHash) {
-        if (seriesHash.hasOwnProperty(name)) {
-            html += this.drawSerie(name, seriesHash[name]);
-        }
-    }
-
-    $('.catboost-panel__series', this.layout).html(html);
-
-    this.updateSeriesValues();
-
-    this.addSeriesEvents();
-};
-
-CatboostIpython.prototype.drawSerie = function(name, hash) {
-    var serieColor = hash.series.learn ? hash.series.learn.line._initial_color : (hash.series.test ? hash.series.test.line._initial_color : '#000000'),
-        path = this.getSeriesPath(hash),
-        id = 'catboost-serie-' + this.index + '-' + hash.index,
-        html = '<div id="' + id + '" class="catboost-panel__serie" style="color:' + serieColor + '">' +
-                    '<div class="catboost-panel__serie_top">' +
-                        '<input type="checkbox" data-seriename="' + name + '" class="catboost-panel__serie_checkbox" id="' + id + '-box" ' + (!this.layoutDisabled.series[name] ? 'checked="checked"' : '') + '></input>' +
-                        '<label title=' + this.meta[path].name + ' for="' + id + '-box" class="catboost-panel__serie_label">' + name + '<div class="catboost-panel__serie_time_left" title="Estimate time"></div></label>' +
-                        '<div class="catboost-panel__serie_time">' +
-                            '<div class="catboost-panel__serie_time_spend" title="Time spend"></div>' +
-                        '</div>' +
-                    '</div>' +
-                    '<div class="catboost-panel__serie_middle catboost-panel__serie__learn_hint">' +
-                        '<div class="catboost-panel__serie_hint">curr</div>' +
-                        '<div class="catboost-panel__serie_learn_pic" style="border-color:' + serieColor + '"></div>' +
-                        '<div class="catboost-panel__serie_learn_value"></div>' +
-                        '<div class="catboost-panel__serie_test_pic" style="border-color:' + serieColor + '"></div>' +
-                        '<div class="catboost-panel__serie_test_value"></div>' +
-                        '<div class="catboost-panel__serie_iteration" title="curr iteration"></div>' +
-                    '</div>' +
-                    '<div class="catboost-panel__serie_bottom">' +
-                        '<div class="catboost-panel__serie_hint catboost-panel__serie__test_hint">best</div>' +
-                        '<div class="catboost-panel__serie_learn_pic" style="border-color:transparent"></div>' +
-                        '<div class="catboost-panel__serie_best_learn_value"></div>' +
-                        '<div class="catboost-panel__serie_test_pic"></div>' +
-                        '<div class="catboost-panel__serie_best_test_value"></div>' +
-                        '<div class="catboost-panel__serie_best_iteration" title="best iteration"></div>' +
-                    '</div>' +
-                '</div>';
-
-    return html;
-};
-*/
 
 CatboostIpython.prototype.groupTraces = function() {
     var traces = this.traces[this.activeTab].traces,
@@ -1054,28 +954,7 @@ CatboostIpython.prototype.drawTrace = function(train, hash) {
 
     return html;
 };
-/*
-CatboostIpython.prototype.updateSeriesValues = function(iteration, click) {
-    var seriesHash = this.groupSeries();
 
-    for (var name in seriesHash) {
-        if (seriesHash.hasOwnProperty(name) && !this.layoutDisabled.series[name]) {
-            this.updateSerieValues(name, seriesHash[name], iteration, click);
-        }
-    }
-};
-*/
-/*
-CatboostIpython.prototype.updateSeriesMin = function() {
-    var seriesHash = this.groupSeries();
-
-    for (var name in seriesHash) {
-        if (seriesHash.hasOwnProperty(name) && !this.layoutDisabled.series[name]) {
-            this.updateSerieMin(name, seriesHash[name]);
-        }
-    }
-};
-*/
 CatboostIpython.prototype.updateTracesValues = function(iteration, click) {
     var tracesHash = this.groupTraces();
 
@@ -1144,26 +1023,6 @@ CatboostIpython.prototype.formatItemValue = function(value, index, suffix) {
     return '<span title="' + suffix + 'value ' + value + '">' + value + '</span>';
 };
 
-/*
-CatboostIpython.prototype.updateSerieMin = function(name, hash) {
-    if (!(hash.series.test && hash.series.test__min__)) {
-        return;
-    }
-
-    var testData = hash.series.test.y,
-        path = this.getSeriesPath(hash),
-        testBestValue = this.getBestValue(testData, path);
-
-    if (testBestValue.index === -1) {
-        return;
-    }
-
-    hash.series.test__min__.x[0] = testBestValue.index;
-    hash.series.test__min__.y[0] = testBestValue.best;
-    hash.series.test__min__.hovertext[0] = testBestValue.func + ': ' + testBestValue.index + ' ' + testBestValue.best;
-};
-*/
-
 CatboostIpython.prototype.updateTraceBest = function(train, hash) {
     var traces = this.filterTracesOne(hash.traces, {best_point: true}),
         self = this;
@@ -1186,17 +1045,6 @@ CatboostIpython.prototype.updateTraceBest = function(train, hash) {
         }
     });
 };
-/*
-CatboostIpython.prototype.getSeriesPath = function(hash) {
-    if (hash.series.test) {
-        return hash.series.test._params.path;
-    }
-
-    if (hash.series.learn) {
-        return hash.series.learn._params.path;
-    }
-};
-*/
 
 CatboostIpython.prototype.getTracesInfo = function(traces) {
     var info = {
@@ -1218,49 +1066,6 @@ CatboostIpython.prototype.getTracesInfo = function(traces) {
 
     return info;
 };
-/*
-CatboostIpython.prototype.updateSerieValues = function(name, hash, iteration, click) {
-    var id = 'catboost-serie-' + this.index + '-' + hash.index,
-        learn = hash.series.learn,
-        learnData = learn ? learn.y : [],
-        test = hash.series.test,
-        testData = test ? test.y : [],
-        index = typeof iteration !== 'undefined' && iteration < learnData.length - 1 ? iteration : learnData.length - 1,
-        learnValue = learnData.length ? learnData[index] : undefined,
-        testValue = testData.length ? testData[index] : undefined,
-        path = this.getSeriesPath(hash),
-        testBestValue = this.getBestValue(testData, path),
-        timeLeft = '',
-        timeSpend = '';
-
-    if (click || !this.clickMode) {
-        $('#' + id + ' .catboost-panel__serie_learn_value', this.layout).html(this.formatItemValue(learnValue, index, 'learn '));
-        $('#' + id + ' .catboost-panel__serie_test_value', this.layout).html(this.formatItemValue(testValue, index, 'test '));
-        $('#' + id + ' .catboost-panel__serie_iteration', this.layout).html(index);
-
-        if (this.timeLeft[path] && this.timeLeft[path][learnData.length - 1]) {
-            timeLeft = this.timeLeft[path][learnData.length - 1][1];
-        }
-        $('#' + id + ' .catboost-panel__serie_time_left', this.layout).html(timeLeft ? ('~' + this.convertTime(timeLeft)) : '');
-
-        if (this.timeLeft[path] && this.timeLeft[path][index]) {
-            timeSpend = this.timeLeft[path][index][2];
-        }
-
-        $('#' + id + ' .catboost-panel__serie_time_spend', this.layout).html(this.convertTime(timeSpend));
-        $('#' + id + ' .catboost-panel__serie_best_iteration', this.layout).html(testBestValue.index > -1 ? testBestValue.index : '');
-
-
-        $('#' + id + ' .catboost-panel__serie_best_test_value', this.layout).html(this.formatItemValue(testBestValue.best, testBestValue.index, 'best test '));
-    }
-
-    if (click) {
-        this.clickMode = true;
-
-        $('#catboost-control2-clickmode' + this.index, this.layout)[0].checked = true;
-    }
-};
-*/
 
 CatboostIpython.prototype.updateTraceValues = function(name, hash, iteration, click) {
     var id = 'catboost-serie-' + this.index + '-' + hash.index,
