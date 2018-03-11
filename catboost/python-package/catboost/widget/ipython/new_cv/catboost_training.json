@@ -12,7 +12,8 @@
 	],
 	"test_metrics":[
 		{"best_value":"Min","name":"Logloss"}
-	],"learn_sets":[
+	],
+	"learn_sets":[
 		"fold_0_learn",
 		"fold_1_learn"
 	]

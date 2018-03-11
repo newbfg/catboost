@@ -186,10 +186,6 @@ CatboostIpython.prototype.addMeta = function(path, meta) {
     this.meta[path] = meta;
 };
 
-CatboostIpython.prototype.setTime = function(path, timeLeft) {
-    this.timeLeft[path] = timeLeft;
-};
-
 CatboostIpython.prototype.addLayout = function(parent) {
     if (this.layout) {
         return;
@@ -382,96 +378,6 @@ CatboostIpython.prototype.setSmoothness = function(weight) {
     this.smoothness = weight;
 };
 
-CatboostIpython.prototype.calcSmoothSeries = function() {
-    var seriesHash = this.groupSeries(),
-        serie,
-        smoothedSerie,
-        colorFlag,
-        enabled = this.getSmoothness() > -1;
-
-    for (var name in seriesHash) {
-        if (seriesHash.hasOwnProperty(name)) {
-            colorFlag = false;
-            serie = seriesHash[name].series.learn;
-            smoothedSerie = seriesHash[name].series.learn__smoothed__;
-
-            if (serie && serie.visible) {
-                if (enabled) {
-                    this.smoothSeries(serie.y, smoothedSerie);
-                    colorFlag = true;
-                }
-
-                this.highlightSmoothSeries(serie, smoothedSerie, colorFlag);
-            }
-
-            colorFlag = false;
-            serie = seriesHash[name].series.test;
-            smoothedSerie = seriesHash[name].series.test__smoothed__;
-
-            if (serie && serie.visible) {
-                if (enabled) {
-                    this.smoothSeries(serie.y, smoothedSerie);
-                    colorFlag = true;
-                }
-
-                this.highlightSmoothSeries(serie, smoothedSerie, colorFlag);
-            }
-        }
-    }
-};
-
-CatboostIpython.prototype.updateTracesSmoothness = function() {
-    var tracesHash = this.groupTraces(),
-        traces = this.filterTracesOne(tracesHash.traces, {smoothed: true}),
-        enabled = this.getSmoothness() > -1,
-        self = this;
-
-    traces.forEach(function(trace) {
-        // looking for correspond non-smoothed trace
-        var nonSmoothedTrace = self.filterTracesEvery(tracesHash.traces, {
-                type: trace._params.type,
-                indexOfSet: trace._params.indexOfSet,
-                smoothed: undefined,
-                best_point: undefined,
-                best_value: undefined
-            }),
-            colorFlag = false;
-
-        if (nonSmoothedTrace.length === 1) {
-            nonSmoothedTrace = nonSmoothedTrace[0];
-
-            if (nonSmoothedTrace.visible) {
-                if (enabled) {
-                    self.smoothSeries(nonSmoothedTrace.y, trace);
-                    colorFlag = true;
-                }
-
-                self.highlightSmoothedTrace(nonSmoothedTrace, trace, colorFlag);
-            }
-        }
-    });
-};
-
-CatboostIpython.prototype.highlightSmoothedTrace = function(trace, smoothedTrace, flag) {
-    if (flag) {
-        smoothedTrace.line.color = trace.line._initial_color;
-        trace.line.color = smoothedTrace.line._initial_color;
-        trace.hoverinfo = 'skip';
-    } else {
-        trace.line.color = trace.line._initial_color;
-        trace.hoverinfo = 'text+x';
-    }
-};
-
-CatboostIpython.prototype.smoothSeries = function(data, serie) {
-    var smoothedPoints = this.smooth(data, this.getSmoothness());
-
-    data.forEach(function(d, index) {
-        serie.y[index] = smoothedPoints[index];
-        serie.hovertext[index] = smoothedPoints[index].toPrecision(7);
-    });
-};
-
 CatboostIpython.prototype.redrawActiveChart = function() {
     this.chartsToRedraw[this.activeTab] = true;
 
@@ -486,6 +392,8 @@ CatboostIpython.prototype.redraw = function() {
         this.updateTracesBest();
         this.updateTracesValues();
         this.updateTracesSmoothness();
+
+        this.updateTracesCV();
 
         this.plotly.redraw(this.traces[this.activeTab].parent);
     }
@@ -518,7 +426,8 @@ CatboostIpython.prototype.addPoints = function(parent, data) {
                 metrics = self.meta[data.path][type + '_metrics'];
 
             for (var i = 0; i < metrics.length; i++) {
-                var nameOfMetric = metrics[i].name;
+                var nameOfMetric = metrics[i].name,
+                    cvAdded = false;
 
                 self.lossFuncs[nameOfMetric] = metrics[i].best_value;
 
@@ -558,7 +467,7 @@ CatboostIpython.prototype.addPoints = function(parent, data) {
                     if (pointValue !== 'inf' && pointValue !== 'nan') {
                         trace.x[pointIndex] = pointIndex;
                         trace.y[pointIndex] = valuesOfSet[i];
-                        trace.hovertext[pointIndex] = valuesOfSet[i].toPrecision(7);
+                        trace.hovertext[pointIndex] = nameOfSet + ': ' + valuesOfSet[i].toPrecision(7);
 
                         smoothedTrace.x[pointIndex] = pointIndex;
                     }
@@ -566,6 +475,12 @@ CatboostIpython.prototype.addPoints = function(parent, data) {
                     if (bestValueTrace) {
                         bestValueTrace.x[pointIndex] = pointIndex;
                         bestValueTrace.y[pointIndex] = self.lossFuncs[nameOfMetric];
+                    }
+
+                    if (self.getLaunchMode(data.path) === 'CV' && !cvAdded) {
+                        cvAdded = true;
+                        self.getTrace(parent, $.extend({cv_avg: true}, params));
+                        self.getTrace(parent, $.extend({cv_avg: true, smoothed: true}, params));
                     }
                 }
 
@@ -575,6 +490,10 @@ CatboostIpython.prototype.addPoints = function(parent, data) {
             }
         });
     });
+};
+
+CatboostIpython.prototype.getLaunchMode = function(path) {
+    return this.meta[path].launch_mode;
 };
 
 CatboostIpython.prototype.getChartNode = function(params, active) {
@@ -692,19 +611,23 @@ CatboostIpython.prototype.getTrace = function(parent, params) {
     } else {
         this.getChart(parent, {id: key.chartId, name: params.chartName, path: params.path});
 
-        var color = this.getNextColor(params.path, params.smoothed ? 0.1 : 1),
+        var plotParams = {
+                color: this.getNextColor(params.path, params.smoothed ? 0.2 : 1),
+                hoverinfo: params.cv_avg ? 'skip' : 'text+x',
+                width: params.cv_avg ? 2 : 1,
+                dash: params.type === 'test' ? 'solid' : 'dot'
+            },
             trace = {
                 name: key.traceName,
                 _params: params,
                 x: [],
                 y: [],
                 hovertext: [],
-                hoverinfo: 'text+x',
+                hoverinfo: plotParams.hoverinfo,
                 line: {
-                    width: 1,
-                    dash: params.type === 'test' ? 'solid' : 'dot',
-                    color: color,
-                    _initial_color: color
+                    width: plotParams.width,
+                    dash: plotParams.dash,
+                    color: plotParams.color
                 },
                 mode: 'lines',
                 hoveron: 'points',
@@ -719,8 +642,7 @@ CatboostIpython.prototype.getTrace = function(parent, params) {
                 y: [],
                 marker: {
                     width: 2,
-                    color: color,
-                    _initial_color: color
+                    color: plotParams.color
                 },
                 hovertext: [],
                 hoverinfo: 'text',
@@ -738,14 +660,15 @@ CatboostIpython.prototype.getTrace = function(parent, params) {
                 line: {
                     width: 1,
                     dash: 'dash',
-                    color: color,
-                    _initial_color: color
+                    color: '#CCCCCC'
                 },
                 mode: 'lines',
                 connectgaps: true,
                 hoverinfo: 'skip'
             };
         }
+
+        trace._params.plotParams = plotParams;
 
         this.traces[key.chartId].traces.push(trace);
 
@@ -760,12 +683,12 @@ CatboostIpython.prototype.getKey = function(params) {
         params.indexOfSet,
         (params.smoothed ? 'smoothed' : ''),
         (params.best_point ? 'best_pount' : ''),
-        (params.best_value ? 'best_value' : '')
+        (params.best_value ? 'best_value' : ''),
+        (params.cv_avg ? 'cv_avg' : '')
     ].join(';');
 
     return {
         chartId: params.chartName + ' ' + params.index,
-        seriesId: params.train + ' ' + params.type + (params.min ? '__min__' : '') + (params.smoothed ? '__smoothed__' : ''),
         traceName: traceName,
         colorId: params.train
     };
@@ -807,38 +730,6 @@ CatboostIpython.prototype.cleanSeries = function() {
     $('.catboost-panel__series', this.layout).html('');
 };
 
-CatboostIpython.prototype.groupSeries = function() {
-    var series = this.traces[this.activeTab].traces,
-        index = 0,
-        seriesHash = {};
-
-    series.map(function(serie) {
-        var name = serie._params.train,
-            prefix = serie._params.type;
-
-        if (serie._params.min) {
-            prefix += '__min__';
-        }
-
-        if (serie._params.smoothed) {
-            prefix += '__smoothed__';
-        }
-
-        if (!seriesHash[name]) {
-            seriesHash[name] = {
-                index: index,
-                series: {}
-            };
-
-            index++;
-        }
-
-        seriesHash[name].series[prefix] = serie;
-    });
-
-    return seriesHash;
-};
-
 CatboostIpython.prototype.groupTraces = function() {
     var traces = this.traces[this.activeTab].traces,
         index = 0,
@@ -850,7 +741,11 @@ CatboostIpython.prototype.groupTraces = function() {
         if (!tracesHash[train]) {
             tracesHash[train] = {
                 index: index,
-                traces: []
+                traces: [],
+                info: {
+                    path: trace._params.path,
+                    color: trace._params.plotParams.color
+                }
             };
 
             index++;
@@ -883,22 +778,27 @@ CatboostIpython.prototype.drawTraces = function() {
     this.addTracesEvents();
 };
 
+CatboostIpython.prototype.getTraceDefParams = function(params) {
+    var defParams =  {
+        smoothed: undefined,
+        best_point: undefined,
+        best_value: undefined,
+        cv_avg: undefined
+    };
+
+    if (params) {
+        return $.extend(defParams, params);
+    } else {
+        return defParams;
+    }
+};
+
 CatboostIpython.prototype.drawTrace = function(train, hash) {
-    var info = this.getTracesInfo(hash.traces),
+    var info = hash.info,
         id = 'catboost-serie-' + this.index + '-' + hash.index,
         traces = {
-            learn: this.filterTracesEvery(hash.traces, {
-                type: 'learn',
-                smoothed: undefined,
-                best_point: undefined,
-                best_value: undefined
-            }),
-            test: this.filterTracesEvery(hash.traces, {
-                type: 'test',
-                smoothed: undefined,
-                best_point: undefined,
-                best_value: undefined
-            })
+            learn: this.filterTracesEvery(hash.traces, this.getTraceDefParams({type: 'learn'})),
+            test: this.filterTracesEvery(hash.traces, this.getTraceDefParams({type: 'test'}))
         },
         items = {
             learn: {
@@ -1013,6 +913,110 @@ CatboostIpython.prototype.getBestValue = function(data) {
     };
 };
 
+CatboostIpython.prototype.updateTracesCV = function() {
+    this.updateTracesCVAvg();
+};
+
+CatboostIpython.prototype.updateTracesCVAvg = function() {
+    var tracesHash = this.groupTraces(),
+        avgTraces = this.filterTracesOne(tracesHash.traces, {cv_avg: true}),
+        self = this;
+
+    avgTraces.forEach(function(trace) {
+        var origTraces = self.filterTracesEvery(tracesHash.traces, self.getTraceDefParams({
+                type: trace._params.type,
+                smoothed: trace._params.smoothed
+            }));
+
+        if (origTraces.length) {
+            self.cvAvgFunc(origTraces, trace);
+        }
+    });
+};
+
+CatboostIpython.prototype.cvAvgFunc = function(origTraces, avgTrace) {
+    var maxCount = origTraces.length,
+        maxLength = -1,
+        count,
+        sum;
+
+    origTraces.forEach(function(origTrace) {
+        if (origTrace.y.length > maxLength) {
+            maxLength = origTrace.y.length;
+        }
+    });
+
+    for (var i = 0; i < maxLength; i++) {
+        sum = 0;
+        count = 0;
+
+        for (var j = 0; j < maxCount; j++) {
+            if (typeof origTraces[j].y[i] !== 'undefined') {
+                sum += origTraces[j].y[i];
+                count++;
+            }
+        }
+
+        if (count > 0) {
+            avgTrace.x[i] = i;
+            avgTrace.y[i] = sum / count;
+        }
+    }
+};
+
+
+CatboostIpython.prototype.updateTracesSmoothness = function() {
+    var tracesHash = this.groupTraces(),
+        smoothedTraces = this.filterTracesOne(tracesHash.traces, {smoothed: true}),
+        enabled = this.getSmoothness() > -1,
+        self = this;
+
+    smoothedTraces.forEach(function(trace) {
+        var origTraces = self.filterTracesEvery(tracesHash.traces, self.getTraceDefParams({
+                type: trace._params.type,
+                indexOfSet: trace._params.indexOfSet,
+                cv_avg: trace._params.cv_avg
+            })),
+            colorFlag = false;
+
+        if (origTraces.length === 1) {
+            origTraces = origTraces[0];
+
+            console.log('updateTracesSmoothness', origTraces, trace);
+
+            if (origTraces.visible) {
+                if (enabled) {
+                    self.smoothFunc(origTraces, trace);
+                    colorFlag = true;
+                }
+
+                self.highlightSmoothedTrace(origTraces, trace, colorFlag);
+            }
+        }
+    });
+};
+
+CatboostIpython.prototype.highlightSmoothedTrace = function(trace, smoothedTrace, flag) {
+    if (flag) {
+        smoothedTrace.line.color = trace._params.plotParams.color;
+        trace.line.color = smoothedTrace._params.plotParams.color;
+        trace.hoverinfo = 'skip';
+    } else {
+        trace.line.color = trace._params.plotParams.color;
+        trace.hoverinfo = trace._params.plotParams.hoverinfo;
+    }
+};
+
+CatboostIpython.prototype.smoothFunc = function(origTrace, smoothedTrace) {
+    var data = origTrace.y,
+        smoothedPoints = this.smooth(data, this.getSmoothness());
+
+    data.forEach(function(d, index) {
+        smoothedTrace.y[index] = smoothedPoints[index];
+        smoothedTrace.hovertext[index] = smoothedPoints[index].toPrecision(7);
+    });
+};
+
 CatboostIpython.prototype.formatItemValue = function(value, index, suffix) {
     if (typeof value === 'undefined') {
         return '';
@@ -1028,14 +1032,10 @@ CatboostIpython.prototype.updateTraceBest = function(train, hash) {
         self = this;
 
     traces.forEach(function(trace) {
-        // looking for correspond test trace
-        var testTrace = self.filterTracesEvery(hash.traces, {
+        var testTrace = self.filterTracesEvery(hash.traces, self.getTraceDefParams({
                 type: 'test',
-                indexOfSet: trace._params.indexOfSet,
-                smoothed: undefined,
-                best_point: undefined,
-                best_value: undefined
-            }),
+                indexOfSet: trace._params.indexOfSet
+            })),
             bestValue = self.getBestValue(testTrace.length === 1 ? testTrace[0].y : []);
 
         if (bestValue.index !== -1) {
@@ -1046,44 +1046,13 @@ CatboostIpython.prototype.updateTraceBest = function(train, hash) {
     });
 };
 
-CatboostIpython.prototype.getTracesInfo = function(traces) {
-    var info = {
-        path: '',
-        color: ''
-    };
-
-    traces.forEach(function(trace) {
-        if (!info.path) {
-            info.path = trace._params.path || '';
-        }
-
-        if (!info.color) {
-            info.color = !trace._params.smoothed && trace.line ? trace.line._initial_color : '';
-        }
-    });
-
-    info.color = info.color || '#000000';
-
-    return info;
-};
-
 CatboostIpython.prototype.updateTraceValues = function(name, hash, iteration, click) {
     var id = 'catboost-serie-' + this.index + '-' + hash.index,
         traces = {
-            learn: this.filterTracesEvery(hash.traces, {
-                type: 'learn',
-                smoothed: undefined,
-                best_point: undefined,
-                best_value: undefined
-            }),
-            test: this.filterTracesEvery(hash.traces, {
-                type: 'test',
-                smoothed: undefined,
-                best_point: undefined,
-                best_value: undefined
-            })
+            learn: this.filterTracesEvery(hash.traces, this.getTraceDefParams({type: 'learn'})),
+            test: this.filterTracesEvery(hash.traces, this.getTraceDefParams({type: 'test'}))
         },
-        path = this.getTracesInfo(hash.traces),
+        path = hash.info.path,
         self = this;
 
     ['learn', 'test'].forEach(function(type) {
@@ -1091,13 +1060,10 @@ CatboostIpython.prototype.updateTraceValues = function(name, hash, iteration, cl
             var data = trace.y || [],
                 index = typeof iteration !== 'undefined' && iteration < data.length - 1 ? iteration : data.length - 1,
                 value = data.length ? data[index] : undefined,
-                testTrace = self.filterTracesEvery(hash.traces, {
+                testTrace = self.filterTracesEvery(hash.traces, self.getTraceDefParams({
                     type: 'test',
-                    indexOfSet: trace._params.indexOfSet,
-                    smoothed: undefined,
-                    best_point: undefined,
-                    best_value: undefined
-                }),
+                    indexOfSet: trace._params.indexOfSet
+                })),
                 bestValue = self.getBestValue(testTrace.length === 1 ? testTrace[0].y : []),
                 timeLeft = '',
                 timeSpend = '';
