@@ -662,8 +662,8 @@ class CatBoost(_CatBoostBase):
             params['iterations'] = params['num_boost_round']
             del params['num_boost_round']
 
-    def _clear_tsv_files(self, train_dir):
-        for filename in ['learn_error.tsv', 'test_error.tsv', 'time_left.tsv', 'meta.tsv']:
+    def _clear_training_files(self, train_dir):
+        for filename in ['catboost_training.json']:
             path = os.path.join(train_dir, filename)
             if os.path.exists(path):
                 os.remove(path)
@@ -715,14 +715,14 @@ class CatBoost(_CatBoostBase):
 
         if plot:
             train_dir = self.get_param('train_dir') or '.'
-            self._clear_tsv_files(train_dir)
+            self._clear_training_files(train_dir)
 
             try:
                 from .widget import CatboostIpythonWidget
                 widget = CatboostIpythonWidget(train_dir)
                 widget._run_update()
             except ImportError as e:
-                warnings.warn("For drow plots in fit() method you should install ipywidgets and ipython")
+                warnings.warn("For draw plots in fit() method you should install ipywidgets and ipython")
                 raise ImportError(str(e))
         with log_fixup():
             self._train(train_pool, eval_set, params, allow_clear_pool)
