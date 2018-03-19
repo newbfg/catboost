@@ -21,4 +21,4 @@
 /local.ymake
 om.conf.local
 test-results
-
+/.ipynb_checkpoints

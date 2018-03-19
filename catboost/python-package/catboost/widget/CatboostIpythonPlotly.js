@@ -350,6 +350,7 @@ CatboostIpython.prototype.setTraceVisibility = function(trace, visibility) {
 CatboostIpython.prototype.updateTracesVisibility = function() {
     var tracesHash = this.groupTraces(),
         traces,
+        smoothDisabled = this.getSmoothness() === -1,
         self = this;
 
     for (var train in tracesHash) {
@@ -397,7 +398,7 @@ CatboostIpython.prototype.updateTracesVisibility = function() {
                     }
                 }
 
-                if (this.getSmoothness() === -1) {
+                if (smoothDisabled) {
                     self.filterTracesOne(traces, {smoothed: true}).forEach(function(trace) {
                         self.setTraceVisibility(trace, false);
                     });
@@ -448,9 +449,8 @@ CatboostIpython.prototype.redraw = function() {
         this.updateTracesVisibility();
         this.updateTracesBest();
         this.updateTracesValues();
-        this.updateTracesSmoothness();
-
         this.updateTracesCV();
+        this.updateTracesSmoothness();
 
         this.plotly.redraw(this.traces[this.activeTab].parent);
     }
@@ -475,7 +475,11 @@ CatboostIpython.prototype.addPoints = function(parent, data) {
 
     data.chunks.forEach(function(item) {
         if (typeof item.remaining_time !== 'undefined' && typeof item.passed_time !== 'undefined') {
-            self.timeLeft[data.path] = [item.iteration, item.remaining_time, item.passed_time];
+            if (!self.timeLeft[data.path]) {
+                self.timeLeft[data.path] = [];
+            }
+
+            self.timeLeft[data.path][item.iteration] = [item.remaining_time, item.passed_time];
         }
 
         ['test', 'learn'].forEach(function(type) {
@@ -901,14 +905,16 @@ CatboostIpython.prototype.drawTrace = function(train, hash) {
                            '<div class="catboost-panel__serie_' + type + '_name">' + trace._params.nameOfSet + '</div>';
         });
     });
+
+    var timeSpendHtml = '<div class="catboost-panel__serie_time">' +
+                             '<div class="catboost-panel__serie_time_spend" title="Time spend"></div>' +
+                        '</div>';
     
     var html = '<div id="' + id + '" class="catboost-panel__serie" style="color:' + info.color + '">' +
                     '<div class="catboost-panel__serie_top">' +
                         '<input type="checkbox" data-seriename="' + train + '" class="catboost-panel__serie_checkbox" id="' + id + '-box" ' + (!this.layoutDisabled.series[train] ? 'checked="checked"' : '') + '></input>' +
                         '<label title=' + this.meta[info.path].name + ' for="' + id + '-box" class="catboost-panel__serie_label">' + train + '<div class="catboost-panel__serie_time_left" title="Estimate time"></div></label>' +
-                        '<div class="catboost-panel__serie_time">' +
-                            '<div class="catboost-panel__serie_time_spend" title="Time spend"></div>' +
-                        '</div>' +
+                        (this.getLaunchMode(info.path) !== 'Eval' ? timeSpendHtml : '') +
                     '</div>' +
                     '<div class="catboost-panel__serie_hint catboost-panel__serie__learn_hint">curr</div>' +
                     '<div class="catboost-panel__serie_hint catboost-panel__serie__test_hint">best</div>' +
@@ -1109,11 +1115,11 @@ CatboostIpython.prototype.cvStdDevFunc = function(origTraces, firstTrace, lastTr
 
         firstTrace.x[i] = i;
         firstTrace.y[i] = avg - std;
-        firstTrace.hovertext[i] = firstTrace._params.nameOfSet + ': ' + avg.toFixed(7) + '-' + std.toFixed(7);
+        firstTrace.hovertext[i] = firstTrace._params.type + ' std: ' + avg.toFixed(7) + '-' + std.toFixed(7);
 
         lastTrace.x[i] = i;
         lastTrace.y[i] = avg + std;
-        lastTrace.hovertext[i] = firstTrace._params.nameOfSet + ': ' + avg.toFixed(7) + '+' + std.toFixed(7);
+        lastTrace.hovertext[i] = lastTrace._params.type + ' std: ' + avg.toFixed(7) + '+' + std.toFixed(7);
     }
 };
 
@@ -1127,7 +1133,9 @@ CatboostIpython.prototype.updateTracesSmoothness = function() {
         var origTraces = self.filterTracesEvery(tracesHash.traces, self.getTraceDefParams({
                 type: trace._params.type,
                 indexOfSet: trace._params.indexOfSet,
-                cv_avg: trace._params.cv_avg
+                cv_avg: trace._params.cv_avg,
+                cv_stddev_first: trace._params.cv_stddev_first,
+                cv_stddev_last: trace._params.cv_stddev_last
             })),
             colorFlag = false;
 
@@ -1159,12 +1167,27 @@ CatboostIpython.prototype.highlightSmoothedTrace = function(trace, smoothedTrace
 
 CatboostIpython.prototype.smoothFunc = function(origTrace, smoothedTrace) {
     var data = origTrace.y,
-        smoothedPoints = this.smooth(data, this.getSmoothness());
+        smoothedPoints = this.smooth(data, this.getSmoothness()),
+        smoothedIndex = 0;
 
-    data.forEach(function(d, index) {
-        smoothedTrace.y[index] = smoothedPoints[index];
-        smoothedTrace.hovertext[index] = smoothedPoints[index].toPrecision(7);
-    });
+    if (smoothedPoints.length) {
+        data.forEach(function (d, index) {
+            if (!smoothedTrace.x[index]) {
+                smoothedTrace.x[index] = index;
+            }
+
+            var nameOfSet = smoothedTrace._params.nameOfSet;
+
+            if (smoothedTrace._params.cv_stddev_first || smoothedTrace._params.cv_stddev_last) {
+                nameOfSet = smoothedTrace._params.type + ' std';
+            }
+
+            smoothedTrace.y[index] = smoothedPoints[smoothedIndex];
+            smoothedTrace.hovertext[index] = nameOfSet + '`: ' + smoothedPoints[smoothedIndex].toPrecision(7);
+
+            smoothedIndex++;
+        });
+    }
 };
 
 CatboostIpython.prototype.formatItemValue = function(value, index, suffix) {
@@ -1224,12 +1247,12 @@ CatboostIpython.prototype.updateTraceValues = function(name, hash, iteration, cl
                 $('#' + id + ' .catboost-panel__serie_iteration', self.layout).html(index);
 
                 if (self.timeLeft[path] && self.timeLeft[path][data.length - 1]) {
-                    timeLeft = self.timeLeft[path][data.length - 1][1];
+                    timeLeft = self.timeLeft[path][data.length - 1][0];
                 }
                 $('#' + id + ' .catboost-panel__serie_time_left', self.layout).html(timeLeft ? ('~' + self.convertTime(timeLeft)) : '');
 
                 if (self.timeLeft[path] && self.timeLeft[path][index]) {
-                    timeSpend = self.timeLeft[path][index][2];
+                    timeSpend = self.timeLeft[path][index][1];
                 }
 
                 $('#' + id + ' .catboost-panel__serie_time_spend', self.layout).html(self.convertTime(timeSpend));
@@ -1301,6 +1324,8 @@ CatboostIpython.prototype.convertTime = function(time) {
         return '0s';
     }
 
+    time = Math.floor(time * 1000);
+
     var millis = time % 1000;
     time = parseInt(time / 1000, 10);
     var seconds = time % 60;
@@ -1311,9 +1336,12 @@ CatboostIpython.prototype.convertTime = function(time) {
     var out = "";
     if (hours && hours > 0) {
         out += hours + 'h ';
+        seconds = 0;
+        millis = 0;
     }
     if (minutes && minutes > 0) {
         out += minutes + 'm ';
+        millis = 0;
     }
     if (seconds && seconds > 0) {
         out += seconds + 's ';
